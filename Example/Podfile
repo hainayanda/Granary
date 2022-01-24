@@ -1,0 +1,7 @@
+use_frameworks!
+target 'Granary_Tests' do
+  pod 'Granary', :path => '../'
+  
+  pod 'Quick', '~> 4.0.0'
+    pod 'Nimble', '~> 9.2.1'
+end

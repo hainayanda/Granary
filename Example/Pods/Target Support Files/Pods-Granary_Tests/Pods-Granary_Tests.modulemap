@@ -1,0 +1,6 @@
+framework module Pods_Granary_Tests {
+  umbrella header "Pods-Granary_Tests-umbrella.h"
+
+  export *
+  module * { export * }
+}
