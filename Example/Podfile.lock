@@ -1,12 +1,12 @@
 PODS:
   - Granary (0.1.0)
-  - Nimble (8.0.9)
-  - Quick (2.2.1)
+  - Nimble (9.2.1)
+  - Quick (4.0.0)
 
 DEPENDENCIES:
   - Granary (from `../`)
-  - Nimble (~> 8.0.7)
-  - Quick (~> 2.2.0)
+  - Nimble (~> 9.2.1)
+  - Quick (~> 4.0.0)
 
 SPEC REPOS:
   trunk:
@@ -19,9 +19,9 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Granary: 2a9cb6c269233cf47927df424ad859911b703f32
-  Nimble: 98b888285a615fd34f20e61753cf58ea1402bde4
-  Quick: f5754d69b7013f5864c29aab9ae6f0c79c5bc200
+  Nimble: e7e615c0335ee4bf5b0d786685451e62746117d5
+  Quick: 6473349e43b9271a8d43839d9ba1c442ed1b7ac4
 
-PODFILE CHECKSUM: 834bf133c149cc17e228ce32c8ad791232acbef5
+PODFILE CHECKSUM: cef52f18e52e8e2c109f906d852271d1e6ea4e75
 
 COCOAPODS: 1.11.2
