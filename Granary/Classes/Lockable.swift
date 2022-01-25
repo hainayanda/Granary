@@ -17,4 +17,12 @@ extension Lockable {
         defer { lock.unlock() }
         return task()
     }
+    
+    func lockIfNotLocked<R>(_ task: () -> R) -> R {
+        guard lock.try() else {
+            return task()
+        }
+        defer { lock.unlock() }
+        return task()
+    }
 }

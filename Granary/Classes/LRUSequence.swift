@@ -7,18 +7,41 @@
 
 import Foundation
 
-public class LRUSequence<Key: Hashable, Value>: Lockable {
+public protocol LRUSequenceEventListener: AnyObject {
+    func lru(sender: AnyObject, willReplace value: Any, withNewValue newValue: Any, withKey key: AnyHashable)
+    func lru(sender: AnyObject, didReplace value: Any, withNewValue newValue: Any, withKey key: AnyHashable)
+    func lru(sender: AnyObject, willAdd value: Any, withKey key: AnyHashable)
+    func lru(sender: AnyObject, didAdd value: Any, withKey key: AnyHashable)
+    func lru(sender: AnyObject, willRemove value: Any, withKey key: AnyHashable)
+    func lru(sender: AnyObject, didRemove value: Any, withKey key: AnyHashable)
+    func lruWillClear(sender: AnyObject)
+    func lruDidClear(sender: AnyObject)
+}
+
+public extension LRUSequenceEventListener {
+    func lru(sender: AnyObject, willReplace value: Any, withNewValue newValue: Any, withKey key: AnyHashable) { }
+    func lru(sender: AnyObject, didReplace value: Any, withNewValue newValue: Any, withKey key: AnyHashable) { }
+    func lru(sender: AnyObject, willAdd value: Any, withKey key: AnyHashable) { }
+    func lru(sender: AnyObject, didAdd value: Any, withKey key: AnyHashable) { }
+    func lru(sender: AnyObject, willRemove value: Any, withKey key: AnyHashable) { }
+    func lru(sender: AnyObject, didRemove value: Any, withKey key: AnyHashable) { }
+    func lruWillClear(sender: AnyObject) { }
+    func lruDidClear(sender: AnyObject) { }
+}
+
+public class LRUSequence<Key: Hashable, Value>: Cache, Lockable {
     
     // MARK: Public Properties
     
     public var keys: [Key] { Array(keyedNodes.keys) }
     public var values: [Value] { keyedNodes.values.map { $0.value } }
+    public var dictionary: [Key: Value] { keyedNodes.mapValues { $0.value } }
     public var count: Int { keyedNodes.count }
-    @MoreThanZero public private(set) var costSize: Int = 0
-    public let maxCostCapacity: Int
+    public weak var listener: LRUSequenceEventListener?
     
     // MARK: Internal Properties
     
+    var costManager: LRUCostManager
     var keyedNodes: [Key: Node] = [:]
     var head: Node? {
         didSet {
@@ -32,88 +55,92 @@ public class LRUSequence<Key: Hashable, Value>: Lockable {
     
     // MARK: Constructor
     
-    public init(maxCost: Int) {
-        self.maxCostCapacity = Swift.max(0, maxCost)
-    }
-    
-    // MARK: Subscript
-    
-    public subscript(_ key: Key) -> Value? {
-        get {
-            getValue(withKey: key)
-        } set {
-            guard let value = newValue else {
-                removeValue(withKey: key)
-                return
-            }
-            store(value, withKey: key)
-        }
+    init(costManager: LRUCostManager) {
+        self.costManager = costManager
     }
     
     // MARK: Public Methods
     
     public func store(_ value: Value, withKey key: Key) {
-        let valueSize = sizeCost(of: value)
-        guard valueSize < maxCostCapacity else { return }
-        guard let currentNode = keyedNodes[key] else {
-            addNewNode(withValue: value, key: key, costSize: valueSize)
-            return
+        lockedRun {
+            guard !costManager.isCostTooMuch(for: value, keyedBy: key) else { return }
+            guard let currentNode = keyedNodes[key] else {
+                listener?.lru(sender: self, willAdd: value, withKey: key)
+                addNewNode(withValue: value, key: key)
+                listener?.lru(sender: self, didAdd: value, withKey: key)
+                return
+            }
+            let oldValue = currentNode.value
+            listener?.lru(sender: self, willReplace: oldValue, withNewValue: value, withKey: key)
+            costManager.susbstractToTotalCost(for: oldValue, keyedBy: key)
+            costManager.addToTotalCost(for: value, keyedBy: key)
+            currentNode.value = value
+            moveToHead(for: currentNode)
+            removeLeastNodeIfNeeded()
+            listener?.lru(sender: self, didReplace: oldValue, withNewValue: value, withKey: key)
         }
-        let oldSize = sizeCost(of: currentNode.value)
-        costSize = costSize - oldSize + valueSize
-        currentNode.value = value
-        moveToHead(for: currentNode)
-        removeLeastNodeIfNeeded()
     }
     
-    public func getValue(withKey key: Key) -> Value? {
-        guard let currentNode = keyedNodes[key] else {
-            return nil
+    public func value(withKey key: Key) -> Value? {
+        lockedRun {
+            guard let currentNode = keyedNodes[key] else {
+                return nil
+            }
+            moveToHead(for: currentNode)
+            return currentNode.value
         }
-        moveToHead(for: currentNode)
-        return currentNode.value
     }
     
     @discardableResult
     public func removeValue(withKey key: Key) -> Value? {
-        guard let currentNode = keyedNodes[key] else {
-            return nil
+        lockedRun {
+            guard let currentNode = keyedNodes[key] else {
+                return nil
+            }
+            listener?.lru(sender: self, willRemove: currentNode.value, withKey: key)
+            let prevNode = currentNode.previous
+            let nextNode = currentNode.next
+            prevNode?.next = nextNode
+            nextNode?.previous = prevNode
+            keyedNodes.removeValue(forKey: key)
+            if currentNode === head {
+                head = nextNode
+            }
+            if currentNode === tail {
+                tail = prevNode
+            }
+            listener?.lru(sender: self, didRemove: currentNode.value, withKey: key)
+            return currentNode.value
         }
-        let prevNode = currentNode.previous
-        let nextNode = currentNode.next
-        prevNode?.next = nextNode
-        nextNode?.previous = prevNode
-        keyedNodes.removeValue(forKey: key)
-        if currentNode === head {
-            head = nextNode
-        }
-        if currentNode === tail {
-            tail = prevNode
-        }
-        return currentNode.value
     }
     
-    public func removeLeastAccessed() -> Value? {
-        let value = tail?.value ?? head?.value
-        removeTail()
-        return value
+    public func removeLeastAccessedValue() -> Value? {
+        lockedRun {
+            let value = tail?.value ?? head?.value
+            removeTail()
+            return value
+        }
+    }
+    
+    public func clear() {
+        lockedRun {
+            listener?.lruWillClear(sender: self)
+            head = nil
+            tail = nil
+            keyedNodes = [:]
+            listener?.lruDidClear(sender: self)
+        }
     }
     
     // MARK: Private Methods
     
-    private func sizeCost(of object: Value) -> Int {
-        guard let calculatable = object as? LRUCostCalculatable else {
-            return MemoryLayout.size(ofValue: object)
-        }
-        return calculatable.sizeCost
-    }
-    
-    private func addNewNode(withValue value: Value, key: Key, costSize: Int) {
+    private func addNewNode(withValue value: Value, key: Key) {
         let newNode = Node(key: key, value: value, next: head)
         let oldHead = head
         oldHead?.previous = newNode
         head = newNode
         keyedNodes[key] = newNode
+        costManager.addToTotalCost(for: value, keyedBy: key)
         removeLeastNodeIfNeeded()
     }
     
@@ -129,7 +156,7 @@ public class LRUSequence<Key: Hashable, Value>: Lockable {
     }
     
     private func removeLeastNodeIfNeeded() {
-        while costSize > maxCostCapacity {
+        while costManager.exceededTotalCost {
             removeTail()
         }
     }
@@ -138,12 +165,13 @@ public class LRUSequence<Key: Hashable, Value>: Lockable {
         guard let tailNode = tail else {
             return
         }
-        let tailSize = sizeCost(of: tailNode.value)
-        costSize -= tailSize
+        listener?.lru(sender: self, willRemove: tailNode.value, withKey: tailNode.key)
+        costManager.susbstractToTotalCost(for: tailNode.value, keyedBy: tailNode.key)
         let prevNode = tailNode.previous
         prevNode?.next = nil
         tail = prevNode
         keyedNodes.removeValue(forKey: tailNode.key)
+        listener?.lru(sender: self, didRemove: tailNode.value, withKey: tailNode.key)
     }
 }
 
